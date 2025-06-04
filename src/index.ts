@@ -14,7 +14,7 @@ import * as os from "os";
 
 const BEAR_URL_SCHEME = "bear://x-callback-url";
 const CALLBACK_PORT = 51234;
-const CALLBACK_TIMEOUT = 10000; // Even longer timeout
+const CALLBACK_TIMEOUT = 10000;
 
 // Token configuration
 const CONFIG_DIR = path.join(os.homedir(), '.bear-mcp');
@@ -67,11 +67,22 @@ class BearCallbackHandler {
     if (this.server) return;
 
     this.server = http.createServer((req, res) => {
-      console.error(`[DEBUG] Received callback: ${req.url}`);
+      // Handle CORS and preflight requests
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      
+      if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
+
+      console.error(`[DEBUG] Received callback: ${req.method} ${req.url}`);
       
       if (!req.url) {
         res.writeHead(400);
-        res.end();
+        res.end('Bad Request');
         return;
       }
 
@@ -103,19 +114,38 @@ class BearCallbackHandler {
           this.responseResolve(response);
         }
 
+        // Return a minimal response that closes immediately
         res.writeHead(200, { "Content-Type": "text/html" });
-        res.end("<html><body><h1>Success!</h1><p>Data received. You can close this window.</p><script>setTimeout(() => window.close(), 1000);</script></body></html>");
+        res.end(`
+          <html>
+            <head><title>Bear MCP</title></head>
+            <body>
+              <script>
+                // Close immediately without user interaction
+                window.close();
+                // If that doesn't work, try to minimize
+                try { window.blur(); } catch(e) {}
+              </script>
+              <p style="font-family: Arial; color: #666;">Success! This window should close automatically.</p>
+            </body>
+          </html>
+        `);
       } else {
         res.writeHead(404);
-        res.end();
+        res.end('Not Found');
       }
     });
 
-    await new Promise<void>((resolve) => {
+    // Handle server errors
+    this.server.on('error', (err) => {
+      console.error('[DEBUG] HTTP server error:', err);
+    });
+
+    await new Promise<void>((resolve, reject) => {
       this.server!.listen(CALLBACK_PORT, () => {
         console.error(`[DEBUG] Callback server listening on port ${CALLBACK_PORT}`);
         resolve();
-      });
+      }).on('error', reject);
     });
   }
 
@@ -134,7 +164,11 @@ class BearCallbackHandler {
 
   stopServer(): void {
     if (this.server) {
-      this.server.close();
+      this.server.close((err) => {
+        if (err) {
+          console.error('[DEBUG] Error closing server:', err);
+        }
+      });
       this.server = null;
       console.error("[DEBUG] Callback server stopped");
     }
@@ -206,7 +240,7 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
 const server = new Server(
   {
     name: "bear-mcp",
-    version: "2.3.0",
+    version: "2.4.0",
   },
   {
     capabilities: {
@@ -259,11 +293,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Comma separated tags (e.g., 'work,ideas')",
             },
-            open_note: {
-              type: "boolean",
-              description: "Open the note in Bear after creation",
-              default: false,
-            },
           },
           required: [],
         },
@@ -281,11 +310,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             title: {
               type: "string",
               description: "Note title (used if id is not provided)",
-            },
-            open_note: {
-              type: "boolean",
-              description: "Also open the note in Bear",
-              default: false,
             },
           },
           required: [],
@@ -305,11 +329,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Tag to search within",
             },
-            show_window: {
-              type: "boolean",
-              description: "Show search results in Bear",
-              default: false,
-            },
           },
           required: ["term"],
         },
@@ -319,13 +338,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "Get all tags from Bear (requires token)",
         inputSchema: {
           type: "object",
-          properties: {
-            show_window: {
-              type: "boolean",
-              description: "Also show tags in Bear window",
-              default: false,
-            },
-          },
+          properties: {},
           required: [],
         },
       },
@@ -351,11 +364,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               enum: ["append", "prepend", "replace", "replace_all"],
               description: "How to add the text (default: append)",
-            },
-            open_note: {
-              type: "boolean",
-              description: "Open the note after adding text",
-              default: false,
             },
           },
           required: ["text"],
@@ -407,13 +415,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (token) {
           statusMessage += "✅ Token is configured\n";
           
-          // Test token by trying to get tags
+          // Test token by trying to get tags (without opening Bear window)
           try {
-            const response = await executeBearURL("tags", {}, true, true);
+            const response = await executeBearURL("tags", { show_window: "no" }, true, true);
             console.error("[DEBUG] Tags response:", response);
             
             if (response && response.tags) {
-              // Handle both old format (array of strings) and new format (array of objects)
               let tagNames: string[] = [];
               if (Array.isArray(response.tags)) {
                 tagNames = response.tags.map((tag: any) => {
@@ -453,11 +460,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "create_note": {
-        const params: BearParams = {};
+        const params: BearParams = {
+          open_note: "no", // Don't open Bear
+        };
         if (args.title) params.title = String(args.title);
         if (args.text) params.text = String(args.text);
         if (args.tags) params.tags = String(args.tags);
-        if (!args.open_note) params["open_note"] = "no";
         
         const response = await executeBearURL("create", params, true);
         
@@ -483,10 +491,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_note": {
-        const params: BearParams = {};
+        const params: BearParams = {
+          open_note: "no", // Don't open Bear
+        };
         if (args.id) params.id = String(args.id);
         if (args.title) params.title = String(args.title);
-        if (!args.open_note) params["open_note"] = "no";
         
         const response = await executeBearURL("open-note", params, true);
         
@@ -496,15 +505,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               {
                 type: "text",
                 text: `# ${response.title || "Note"}\n\n${response.note}\n\n---\nID: ${response.identifier}\nTags: ${response.tags || "none"}\nModified: ${response.modificationDate}`,
-              },
-            ],
-          };
-        } else if (args.open_note) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Note opened in Bear (content retrieval requires Bear's advanced settings to be enabled)",
               },
             ],
           };
@@ -535,9 +535,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const params: BearParams = {
           term: String(args.term),
+          show_window: "no", // Don't open Bear window
         };
         if (args.tag) params.tag = String(args.tag);
-        if (!args.show_window) params["show_window"] = "no";
         
         try {
           const response = await executeBearURL("search", params, true, true);
@@ -604,15 +604,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const params: BearParams = {};
-        if (!args.show_window) params["show_window"] = "no";
+        const params: BearParams = {
+          show_window: "no", // Don't open Bear window
+        };
         
         try {
           const response = await executeBearURL("tags", params, true, true);
           console.error("[DEBUG] Get tags response:", response);
           
           if (response && response.tags && Array.isArray(response.tags)) {
-            // Handle both old format (array of strings) and new format (array of objects)
             let tagNames: string[] = [];
             tagNames = response.tags.map((tag: any) => {
               if (typeof tag === 'string') {
@@ -657,11 +657,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "add_text": {
         const params: BearParams = {
           text: String(args.text),
+          open_note: "no", // Don't open Bear
         };
         if (args.id) params.id = String(args.id);
         if (args.title) params.title = String(args.title);
         if (args.mode) params.mode = String(args.mode);
-        if (!args.open_note) params["open_note"] = "no";
         
         const response = await executeBearURL("add-text", params, true);
         
@@ -707,10 +707,10 @@ async function main() {
   
   const token = getCurrentToken();
   if (!token) {
-    console.error("Bear MCP server v2.3 running - No token configured");
+    console.error("Bear MCP server v2.4 running - No token configured");
     console.error("Use 'set_bear_token' tool to configure authentication");
   } else {
-    console.error("Bear MCP server v2.3 running with token authentication");
+    console.error("Bear MCP server v2.4 running with token authentication");
   }
 }
 
