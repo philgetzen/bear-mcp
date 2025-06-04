@@ -1,6 +1,6 @@
 {
   "name": "bear-mcp",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "description": "MCP server for Bear Note Taking App - integrate Bear with Claude Desktop",
   "main": "dist/index.js",
   "bin": {

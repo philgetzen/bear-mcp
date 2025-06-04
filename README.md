@@ -4,69 +4,33 @@
 ![License](https://img.shields.io/github/license/philgetzen/bear-mcp)
 ![npm version](https://img.shields.io/npm/v/bear-mcp)
 
-An MCP (Model Context Protocol) server for integrating Bear Note Taking App with Claude Desktop. This server provides tools to create notes and interact with Bear directly.
+An MCP (Model Context Protocol) server for integrating Bear Note Taking App with Claude Desktop. This server allows Claude to read, create, and search your Bear notes directly.
 
-## ⚠️ Important Limitations (v3.0.0)
+## ✨ Features (v4.0.0)
 
-**Bear's API Design**: Bear's x-callback-url system is designed for app-to-app communication, not data retrieval. This creates fundamental limitations in what this MCP server can accomplish.
+**Full data retrieval restored!** Claude can now:
+- 🔍 **Search notes** and get full results with metadata
+- 🏷️ **Retrieve all tags** from your Bear database
+- 📖 **Read note content** for analysis
+- ✏️ **Create notes** and get their IDs back
+- 📝 **Add text** to existing notes
 
-### What Works ✅
-- **Creating notes** - Works perfectly, note is created in Bear
-- **Opening Bear with search** - Opens Bear app with your search term
-- **Opening Bear's tags view** - Opens Bear's tag management interface
-- **Adding text to notes** - Appends/prepends text to existing notes
-
-### What Doesn't Work ❌
-- **Reading note content** - Cannot retrieve note text due to Bear API limitations
-- **Search results** - Cannot get search results, only opens Bear with search
-- **Tag lists** - Cannot retrieve tag lists, only opens Bear's tag view
-- **Note metadata** - Cannot get note titles, modification dates, etc.
+### What's New in v4.0.0
+- ✅ **Fixed browser popup issues** - No more lingering browser windows!
+- ✅ **Improved HTTP callback handling** - Auto-closing responses
+- ✅ **Better error handling** - Clear error messages and recovery
+- ✅ **Silent operation** - Bear stays in background during operations
 
 ## Available Tools
 
-### Core Operations
-| Tool | Functionality | Behavior |
-|------|---------------|----------|
-| `create_note` | Creates new notes | ✅ **Works**: Creates note in Bear |
-| `add_text` | Adds text to existing notes | ✅ **Works**: Modifies notes in Bear |
-| `open_bear_search` | Search within Bear | ✅ **Works**: Opens Bear with search term |
-| `open_bear_tags` | View tags in Bear | ✅ **Works**: Opens Bear's tag interface |
-
-### Limited Operations
-| Tool | What It Does | Limitation |
-|------|--------------|------------|
-| `get_note` | Attempts to open note | ⚠️ **Limited**: Only opens note in Bear, cannot return content |
-| `search_notes` | Attempts to search | ⚠️ **Limited**: Recommends using `open_bear_search` instead |
-| `get_tags` | Attempts to list tags | ⚠️ **Limited**: Recommends using `open_bear_tags` instead |
-
-## User Experience Expectations
-
-### ✅ Excellent for:
-- **Note Creation**: "Create a note about today's meeting with agenda items"
-- **Content Addition**: "Add these action items to my project planning note"
-- **Guided Search**: "Help me search for notes about machine learning" (opens Bear with search)
-
-### ⚠️ Limited for:
-- **Content Analysis**: Cannot read existing notes to analyze or summarize
-- **Automated Search**: Cannot retrieve search results for processing
-- **Data Export**: Cannot extract note data for external use
-
-### ❌ Not Suitable for:
-- **Content Retrieval**: Reading existing note content
-- **Bulk Operations**: Processing multiple notes at once
-- **Data Analytics**: Analyzing note patterns or tag usage
-
-## Why These Limitations Exist
-
-Bear's x-callback-url API was designed for **app-to-app communication** where:
-1. One app sends a command to Bear
-2. Bear performs the action
-3. Bear optionally opens a callback URL in the requesting app
-
-This works great for mobile apps but doesn't work for command-line tools like MCP servers because:
-- Callbacks require HTTP servers (causes browser windows to open)
-- Bear expects to send responses via URL schemes
-- No direct data return mechanism exists
+| Tool | Functionality | Returns |
+|------|---------------|---------|
+| `create_note` | Creates new notes | ✅ Note ID and title |
+| `get_note` | Retrieves note content | ✅ Full note text, tags, dates |
+| `search_notes` | Searches notes | ✅ List with titles, IDs, tags |
+| `get_tags` | Lists all tags | ✅ Complete tag list |
+| `add_text` | Adds text to notes | ✅ Success confirmation |
+| `check_bear_setup` | Tests configuration | ✅ Setup status and sample data |
 
 ## Installation
 
@@ -126,37 +90,67 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
    - Go to "Advanced" tab
    - Enable "Allow x-callback-url"
 
-2. **Generate API Token** (recommended):
+2. **Generate API Token** (for search and tags):
    - Open Bear → Help → Advanced → API Token
    - Click "Copy Token"
    - In Claude, use: `set_bear_token` with your token
 
 ## Usage Examples
 
-### ✅ Recommended Usage Patterns
-
-**Creating Content:**
+### Setup and Testing
 ```
-Create a new Bear note titled "Weekly Planning" with sections for goals, tasks, and notes
+Check my Bear setup and show me a summary of what's available
 ```
 
-**Adding to Existing Notes:**
+### Creating and Reading Notes
 ```
-Add these meeting notes to my "Project Alpha" note: [your content here]
-```
+Create a new Bear note titled "Project Ideas" with content about machine learning applications
 
-**Guided Search:**
-```
-Help me search my Bear notes for information about "quarterly planning" - open Bear with the search
+Get the content of my Bear note titled "Meeting Notes" so you can summarize it
 ```
 
-### ⚠️ Adjust Expectations
+### Searching and Organizing
+```
+Search my Bear notes for "project roadmap" and show me what you find
 
-**Instead of:** "Search my Bear notes and summarize what you find about project management"
-**Try:** "Open Bear to search for project management notes, then I'll copy relevant content for you to analyze"
+Get all my Bear tags and identify which ones might be redundant
+```
 
-**Instead of:** "Get my Bear note titled 'Ideas' and add more brainstorming points"
-**Try:** "Add these brainstorming points to my Bear note titled 'Ideas': [your points]"
+### Working with Content
+```
+Add "## Action Items\n- Follow up with team" to my Bear note titled "Weekly Review"
+```
+
+## Technical Details
+
+### HTTP Callback Handling
+The server uses a local HTTP server (port 51234) to receive Bear's x-callback-url responses. When Bear completes an operation, it sends the results back to this server. The new implementation:
+
+- Sends proper CORS headers for browser compatibility
+- Returns auto-closing HTML pages to prevent lingering windows
+- Implements request timeouts for reliability
+- Cleans up connections immediately after use
+
+### Browser Window Behavior
+If you see a browser window flash briefly when using the tools, this is normal. The window should close automatically within a second. If windows persist, check your browser's popup settings.
+
+## Troubleshooting
+
+### "No token configured"
+Get your token from Bear → Help → Advanced → API Token, then use the `set_bear_token` tool.
+
+### "Bear not found"
+Make sure Bear is installed and has been opened at least once.
+
+### Browser windows not closing
+- Check your browser allows JavaScript to close windows
+- The window should show "✓ Success! This window will close automatically..."
+- If issues persist, you can safely close these windows manually
+
+### No search results
+- Ensure your search term exists in your notes
+- Check that your token is valid using `check_bear_setup`
+- Try a simpler search term
 
 ## Development
 
@@ -171,13 +165,10 @@ npm run build
 node dist/index.js
 ```
 
-## Alternative Approaches Investigated
-
-We explored direct database access to Bear's CloudKit storage but found:
-- Bear stores data in binary CloudKit format (protobuf-like encoding)
-- Note content is heavily encoded and not extractable
-- Only metadata (record IDs, timestamps) are readable
-- This approach is not viable for content retrieval
+To run the test script:
+```bash
+node test-restored.js
+```
 
 ## Requirements
 
