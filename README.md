@@ -4,28 +4,33 @@
 ![License](https://img.shields.io/github/license/philgetzen/bear-mcp)
 ![npm version](https://img.shields.io/npm/v/bear-mcp)
 
-An MCP (Model Context Protocol) server for integrating Bear Note Taking App with Claude Desktop.
+An MCP (Model Context Protocol) server for integrating Bear Note Taking App with Claude Desktop. This server allows Claude to read, create, and search your Bear notes directly.
 
 ## Features
 
-This MCP server provides the following tools to interact with Bear:
+**v0.2.0 Update**: Now with full data retrieval! Claude can read and analyze your note content directly.
 
-### Note Operations
-- **create_note** - Create a new note with title, text, and tags
-- **open_note** - Open a specific note by ID or title
-- **add_text** - Append, prepend, or replace text in existing notes
-- **search_notes** - Search for notes by term or within specific tags
+### Core Operations
+- **create_note** - Create a new note and get its ID back
+- **get_note** - Retrieve full note content for analysis
+- **search_notes** - Search and get results with metadata
+- **get_tags** - List all tags in your Bear database
+- **add_text** - Append, prepend, or replace text in notes
 
-### Tag Management
-- **get_tags** - List all tags in Bear
-- **open_tag** - View notes with specific tag(s)
-- **rename_tag** - Rename an existing tag
-- **delete_tag** - Remove a tag from all notes
+### Key Improvements in v0.2.0
+- 📖 **Content Retrieval**: Tools now return actual note content
+- 🔍 **Search Results**: Get note metadata without opening Bear
+- 🏷️ **Tag Lists**: Retrieve all tags programmatically
+- 🆔 **Note IDs**: Create operations return note identifiers
 
-### Note Management
-- **trash_note** - Move a note to trash
-- **archive_note** - Archive a note
-- **grab_url** - Create a note from a webpage
+## Important: Bear Configuration
+
+To enable data retrieval features:
+1. Open Bear → Settings (⌘,)
+2. Go to "Advanced" tab
+3. Enable "Allow x-callback-url"
+
+Without this setting, tools will only open Bear but won't return data to Claude.
 
 ## Installation
 
@@ -81,19 +86,23 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 
 Once configured, you can use Bear tools in Claude Desktop:
 
-### Creating a Note
+### Creating and Getting Notes
 ```
-Use the bear create_note tool to create a new note titled "Meeting Notes" with the text "Discussion points for today's meeting" and tag it with "work,meetings"
+Create a new Bear note titled "Project Ideas" with content about machine learning applications
+
+Get the content of my Bear note titled "Meeting Notes" so you can summarize it
 ```
 
-### Searching Notes
+### Searching and Analyzing
 ```
-Use the bear search_notes tool to find all notes containing "project roadmap"
+Search my Bear notes for "project roadmap" and show me what you find
+
+Get all my Bear tags and identify which ones might be redundant
 ```
 
-### Managing Tags
+### Working with Content
 ```
-Use the bear rename_tag tool to rename the tag "todo" to "tasks"
+Add "## Action Items\n- Follow up with team" to my Bear note titled "Weekly Review"
 ```
 
 ## Development

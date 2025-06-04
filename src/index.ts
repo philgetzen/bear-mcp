@@ -5,30 +5,135 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import open from "open";
+import { execSync } from "child_process";
+import * as http from "http";
+import { URL } from "url";
 
 const BEAR_URL_SCHEME = "bear://x-callback-url";
+const CALLBACK_PORT = 51234;
+const CALLBACK_TIMEOUT = 5000;
 
 interface BearParams {
   [key: string]: string | undefined;
 }
 
-async function openBearURL(action: string, params: BearParams): Promise<void> {
-  const url = new URL(`${BEAR_URL_SCHEME}/${action}`);
-  
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined) {
-      url.searchParams.append(key, value);
-    }
-  });
+interface BearResponse {
+  [key: string]: any;
+}
 
-  await open(url.toString());
+class BearCallbackHandler {
+  private server: http.Server | null = null;
+  private responsePromise: Promise<BearResponse> | null = null;
+  private responseResolve: ((value: BearResponse) => void) | null = null;
+
+  async startServer(): Promise<void> {
+    if (this.server) return;
+
+    this.server = http.createServer((req, res) => {
+      if (!req.url) {
+        res.writeHead(400);
+        res.end();
+        return;
+      }
+
+      const url = new URL(req.url, `http://localhost:${CALLBACK_PORT}`);
+      
+      if (url.pathname === "/bear-callback") {
+        const response: BearResponse = {};
+        
+        url.searchParams.forEach((value, key) => {
+          try {
+            // Try to parse as JSON (for arrays)
+            response[key] = JSON.parse(decodeURIComponent(value));
+          } catch {
+            // If not JSON, treat as string
+            response[key] = decodeURIComponent(value);
+          }
+        });
+
+        if (this.responseResolve) {
+          this.responseResolve(response);
+        }
+
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end("<html><body><h1>Success!</h1><p>You can close this window.</p><script>window.close();</script></body></html>");
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    await new Promise<void>((resolve) => {
+      this.server!.listen(CALLBACK_PORT, () => {
+        resolve();
+      });
+    });
+  }
+
+  async waitForCallback(): Promise<BearResponse> {
+    this.responsePromise = new Promise<BearResponse>((resolve, reject) => {
+      this.responseResolve = resolve;
+      
+      setTimeout(() => {
+        reject(new Error("Callback timeout"));
+      }, CALLBACK_TIMEOUT);
+    });
+
+    return this.responsePromise;
+  }
+
+  stopServer(): void {
+    if (this.server) {
+      this.server.close();
+      this.server = null;
+    }
+  }
+}
+
+async function executeBearURL(action: string, params: BearParams, expectResponse: boolean = false): Promise<BearResponse | null> {
+  const callbackHandler = new BearCallbackHandler();
+  
+  try {
+    // Start callback server if we expect a response
+    if (expectResponse) {
+      await callbackHandler.startServer();
+      params["x-success"] = `http://localhost:${CALLBACK_PORT}/bear-callback`;
+      params["x-error"] = `http://localhost:${CALLBACK_PORT}/bear-callback`;
+    }
+
+    // Build the URL
+    const url = new URL(`${BEAR_URL_SCHEME}/${action}`);
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) {
+        url.searchParams.append(key, value);
+      }
+    });
+
+    // Use AppleScript to open the URL (more reliable than 'open' command)
+    const script = `open location "${url.toString()}"`;
+    execSync(`osascript -e '${script}'`);
+
+    // Wait for callback if expected
+    if (expectResponse) {
+      try {
+        const response = await callbackHandler.waitForCallback();
+        return response;
+      } catch (error) {
+        // Timeout or error - Bear might not support callback for this action
+        return null;
+      }
+    }
+
+    return null;
+  } finally {
+    callbackHandler.stopServer();
+  }
 }
 
 const server = new Server(
   {
     name: "bear-mcp",
-    version: "1.0.0",
+    version: "2.0.0",
   },
   {
     capabilities: {
@@ -42,7 +147,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: "create_note",
-        description: "Create a new note in Bear",
+        description: "Create a new note in Bear and return its ID",
         inputSchema: {
           type: "object",
           properties: {
@@ -58,21 +163,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Comma separated tags (e.g., 'work,ideas')",
             },
-            clipboard: {
+            open_note: {
               type: "boolean",
-              description: "Append clipboard content",
-            },
-            timestamp: {
-              type: "boolean",
-              description: "Prepend timestamp",
+              description: "Open the note in Bear after creation",
+              default: false,
             },
           },
           required: [],
         },
       },
       {
-        name: "open_note",
-        description: "Open a specific note in Bear",
+        name: "get_note",
+        description: "Get the content of a specific note",
         inputSchema: {
           type: "object",
           properties: {
@@ -82,23 +184,50 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             title: {
               type: "string",
-              description: "Note title (ignored if id is provided)",
+              description: "Note title (used if id is not provided)",
             },
-            header: {
+            open_note: {
+              type: "boolean",
+              description: "Also open the note in Bear",
+              default: false,
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "search_notes",
+        description: "Search for notes and return results with metadata",
+        inputSchema: {
+          type: "object",
+          properties: {
+            term: {
               type: "string",
-              description: "Header inside the note to jump to",
+              description: "Search term",
             },
-            exclude_trashed: {
-              type: "boolean",
-              description: "Exclude trashed notes",
+            tag: {
+              type: "string",
+              description: "Tag to search within",
             },
-            new_window: {
+            show_window: {
               type: "boolean",
-              description: "Open in new window",
+              description: "Show search results in Bear",
+              default: false,
             },
-            edit: {
+          },
+          required: ["term"],
+        },
+      },
+      {
+        name: "get_tags",
+        description: "Get all tags from Bear",
+        inputSchema: {
+          type: "object",
+          properties: {
+            show_window: {
               type: "boolean",
-              description: "Open note in edit mode",
+              description: "Also show tags in Bear window",
+              default: false,
             },
           },
           required: [],
@@ -127,143 +256,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               enum: ["append", "prepend", "replace", "replace_all"],
               description: "How to add the text (default: append)",
             },
-            new_line: {
+            open_note: {
               type: "boolean",
-              description: "Add newline before text when appending",
-            },
-            tags: {
-              type: "string",
-              description: "Comma separated tags to add",
+              description: "Open the note after adding text",
+              default: false,
             },
           },
           required: ["text"],
-        },
-      },
-      {
-        name: "search_notes",
-        description: "Search for notes in Bear",
-        inputSchema: {
-          type: "object",
-          properties: {
-            term: {
-              type: "string",
-              description: "Search term",
-            },
-            tag: {
-              type: "string",
-              description: "Tag to search within",
-            },
-          },
-          required: ["term"],
-        },
-      },
-      {
-        name: "get_tags",
-        description: "Get all tags in Bear",
-        inputSchema: {
-          type: "object",
-          properties: {},
-          required: [],
-        },
-      },
-      {
-        name: "open_tag",
-        description: "Show notes with specific tag(s)",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: {
-              type: "string",
-              description: "Tag name(s), comma separated for multiple",
-            },
-          },
-          required: ["name"],
-        },
-      },
-      {
-        name: "rename_tag",
-        description: "Rename an existing tag",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: {
-              type: "string",
-              description: "Current tag name",
-            },
-            new_name: {
-              type: "string",
-              description: "New tag name",
-            },
-          },
-          required: ["name", "new_name"],
-        },
-      },
-      {
-        name: "delete_tag",
-        description: "Delete a tag from all notes",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: {
-              type: "string",
-              description: "Tag name to delete",
-            },
-          },
-          required: ["name"],
-        },
-      },
-      {
-        name: "trash_note",
-        description: "Move a note to trash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: {
-              type: "string",
-              description: "Note unique identifier",
-            },
-            title: {
-              type: "string",
-              description: "Note title (ignored if id is provided)",
-            },
-          },
-          required: [],
-        },
-      },
-      {
-        name: "archive_note",
-        description: "Archive a note",
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: {
-              type: "string",
-              description: "Note unique identifier",
-            },
-            title: {
-              type: "string",
-              description: "Note title (ignored if id is provided)",
-            },
-          },
-          required: [],
-        },
-      },
-      {
-        name: "grab_url",
-        description: "Create a note from a webpage",
-        inputSchema: {
-          type: "object",
-          properties: {
-            url: {
-              type: "string",
-              description: "Webpage URL to grab",
-            },
-            tags: {
-              type: "string",
-              description: "Comma separated tags",
-            },
-          },
-          required: ["url"],
         },
       },
     ],
@@ -284,38 +283,153 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.title) params.title = String(args.title);
         if (args.text) params.text = String(args.text);
         if (args.tags) params.tags = String(args.tags);
-        if (args.clipboard) params.clipboard = "yes";
-        if (args.timestamp) params.timestamp = "yes";
+        if (!args.open_note) params["open_note"] = "no";
         
-        await openBearURL("create", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Note created successfully",
-            },
-          ],
-        };
+        const response = await executeBearURL("create", params, true);
+        
+        if (response && response.identifier) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Note created successfully\nID: ${response.identifier}\nTitle: ${response.title || args.title || "Untitled"}`,
+              },
+            ],
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Note created in Bear (ID not returned - you may need to enable Bear's advanced settings)",
+              },
+            ],
+          };
+        }
       }
 
-      case "open_note": {
+      case "get_note": {
         const params: BearParams = {};
         if (args.id) params.id = String(args.id);
         if (args.title) params.title = String(args.title);
-        if (args.header) params.header = String(args.header);
-        if (args.exclude_trashed) params.exclude_trashed = "yes";
-        if (args.new_window) params.new_window = "yes";
-        if (args.edit) params.edit = "yes";
+        if (!args.open_note) params["open_note"] = "no";
         
-        await openBearURL("open-note", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Note opened successfully",
-            },
-          ],
+        const response = await executeBearURL("open-note", params, true);
+        
+        if (response && response.note) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `# ${response.title || "Note"}\n\n${response.note}\n\n---\nID: ${response.identifier}\nTags: ${response.tags || "none"}\nModified: ${response.modificationDate}`,
+              },
+            ],
+          };
+        } else if (args.open_note) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Note opened in Bear (content retrieval requires Bear's advanced settings to be enabled)",
+              },
+            ],
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Unable to retrieve note content. Make sure Bear's advanced settings allow x-callback-url responses.",
+              },
+            ],
+          };
+        }
+      }
+
+      case "search_notes": {
+        const params: BearParams = {
+          term: String(args.term),
         };
+        if (args.tag) params.tag = String(args.tag);
+        if (!args.show_window) params["show_window"] = "no";
+        
+        const response = await executeBearURL("search", params, true);
+        
+        if (response && response.notes) {
+          const notes = response.notes;
+          let resultText = `Found ${notes.length} notes matching "${args.term}":\n\n`;
+          
+          notes.forEach((note: any, index: number) => {
+            resultText += `${index + 1}. ${note.title || "Untitled"}\n`;
+            resultText += `   ID: ${note.identifier}\n`;
+            resultText += `   Tags: ${note.tags || "none"}\n`;
+            resultText += `   Modified: ${note.modificationDate}\n\n`;
+          });
+          
+          return {
+            content: [
+              {
+                type: "text",
+                text: resultText,
+              },
+            ],
+          };
+        } else if (args.show_window) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Search results shown in Bear window",
+              },
+            ],
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Search completed but results not returned. Enable Bear's advanced settings for x-callback-url.",
+              },
+            ],
+          };
+        }
+      }
+
+      case "get_tags": {
+        const params: BearParams = {};
+        if (!args.show_window) params["show_window"] = "no";
+        
+        const response = await executeBearURL("tags", params, true);
+        
+        if (response && response.tags) {
+          const tags = response.tags;
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Found ${tags.length} tags:\n\n${tags.join("\n")}`,
+              },
+            ],
+          };
+        } else if (args.show_window) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Tags shown in Bear window",
+              },
+            ],
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Unable to retrieve tags. Enable Bear's advanced settings for x-callback-url.",
+              },
+            ],
+          };
+        }
       }
 
       case "add_text": {
@@ -325,145 +439,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.id) params.id = String(args.id);
         if (args.title) params.title = String(args.title);
         if (args.mode) params.mode = String(args.mode);
-        if (args.new_line) params.new_line = "yes";
-        if (args.tags) params.tags = String(args.tags);
+        if (!args.open_note) params["open_note"] = "no";
         
-        await openBearURL("add-text", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Text added successfully",
-            },
-          ],
-        };
-      }
-
-      case "search_notes": {
-        const params: BearParams = {
-          term: String(args.term),
-        };
-        if (args.tag) params.tag = String(args.tag);
+        const response = await executeBearURL("add-text", params, true);
         
-        await openBearURL("search", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Search opened in Bear",
-            },
-          ],
-        };
-      }
-
-      case "get_tags": {
-        await openBearURL("tags", {});
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Tags list opened in Bear",
-            },
-          ],
-        };
-      }
-
-      case "open_tag": {
-        const params: BearParams = {
-          name: String(args.name),
-        };
-        
-        await openBearURL("open-tag", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Tag notes opened successfully",
-            },
-          ],
-        };
-      }
-
-      case "rename_tag": {
-        const params: BearParams = {
-          name: String(args.name),
-          new_name: String(args.new_name),
-        };
-        
-        await openBearURL("rename-tag", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Tag renamed successfully",
-            },
-          ],
-        };
-      }
-
-      case "delete_tag": {
-        const params: BearParams = {
-          name: String(args.name),
-        };
-        
-        await openBearURL("delete-tag", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Tag deleted successfully",
-            },
-          ],
-        };
-      }
-
-      case "trash_note": {
-        const params: BearParams = {};
-        if (args.id) params.id = String(args.id);
-        if (args.title) params.title = String(args.title);
-        
-        await openBearURL("trash", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Note moved to trash",
-            },
-          ],
-        };
-      }
-
-      case "archive_note": {
-        const params: BearParams = {};
-        if (args.id) params.id = String(args.id);
-        if (args.title) params.title = String(args.title);
-        
-        await openBearURL("archive", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Note archived successfully",
-            },
-          ],
-        };
-      }
-
-      case "grab_url": {
-        const params: BearParams = {
-          url: String(args.url),
-        };
-        if (args.tags) params.tags = String(args.tags);
-        
-        await openBearURL("grab-url", params);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "URL content grabbed successfully",
-            },
-          ],
-        };
+        if (response && response.identifier) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Text added successfully to note: ${response.title || "Untitled"} (ID: ${response.identifier})`,
+              },
+            ],
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Text added to note in Bear",
+              },
+            ],
+          };
+        }
       }
 
       default:
@@ -484,7 +482,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Bear MCP server running on stdio");
+  console.error("Bear MCP server v2 running with callback support");
 }
 
 main().catch((error) => {
