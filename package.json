@@ -1,6 +1,6 @@
 {
   "name": "bear-mcp",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "MCP server for Bear Note Taking App - integrate Bear with Claude Desktop",
   "main": "dist/index.js",
   "bin": {
@@ -30,10 +30,12 @@
   "homepage": "https://github.com/philgetzen/bear-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "open": "^10.1.0"
+    "open": "^10.1.0",
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/sqlite3": "^3.1.11",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

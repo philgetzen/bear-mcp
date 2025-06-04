@@ -129,7 +129,7 @@ async function getBearTags(): Promise<string[]> {
 const server = new Server(
   {
     name: "bear-mcp",
-    version: "3.0.0",
+    version: "3.1.0",
   },
   {
     capabilities: {
