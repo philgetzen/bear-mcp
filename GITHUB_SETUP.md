@@ -30,12 +30,12 @@ gh repo create bear-mcp --public --source=. --remote=origin --push
 
 1. Add the remote repository:
    ```bash
-   git remote add origin https://github.com/YOUR_USERNAME/bear-mcp.git
+   git remote add origin https://github.com/philgetzen/bear-mcp.git
    ```
    
    Or if using SSH:
    ```bash
-   git remote add origin git@github.com:YOUR_USERNAME/bear-mcp.git
+   git remote add origin git@github.com:philgetzen/bear-mcp.git
    ```
 
 2. Push the main branch:
@@ -80,12 +80,12 @@ Replace placeholders in package.json:
 {
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YOUR_USERNAME/bear-mcp.git"
+    "url": "git+https://github.com/philgetzen/bear-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/YOUR_USERNAME/bear-mcp/issues"
+    "url": "https://github.com/philgetzen/bear-mcp/issues"
   },
-  "homepage": "https://github.com/YOUR_USERNAME/bear-mcp#readme"
+  "homepage": "https://github.com/philgetzen/bear-mcp#readme"
 }
 ```
 
@@ -97,8 +97,8 @@ Edit `.github/dependabot.yml` and replace `YOUR_GITHUB_USERNAME` with your actua
 
 Add badges to your README.md:
 ```markdown
-![CI/CD](https://github.com/YOUR_USERNAME/bear-mcp/workflows/CI%2FCD%20Pipeline/badge.svg)
-![License](https://img.shields.io/github/license/YOUR_USERNAME/bear-mcp)
+![CI/CD](https://github.com/philgetzen/bear-mcp/workflows/CI%2FCD%20Pipeline/badge.svg)
+![License](https://img.shields.io/github/license/philgetzen/bear-mcp)
 ![npm version](https://img.shields.io/npm/v/bear-mcp)
 ```
 

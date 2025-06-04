@@ -29,7 +29,7 @@ By participating in this project, you agree to abide by our Code of Conduct:
 1. Fork the repository on GitHub
 2. Clone your fork locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/bear-mcp.git
+   git clone https://github.com/philgetzen/bear-mcp.git
    cd bear-mcp
    ```
 3. Add the upstream repository as a remote:
