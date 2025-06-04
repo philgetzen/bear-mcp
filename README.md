@@ -6,31 +6,57 @@
 
 An MCP (Model Context Protocol) server for integrating Bear Note Taking App with Claude Desktop. This server allows Claude to read, create, and search your Bear notes directly.
 
-## ✨ Features (v4.0.0)
+## ✨ Features (v4.0.2)
 
-**Full data retrieval restored!** Claude can now:
-- 🔍 **Search notes** and get full results with metadata
+**Full data retrieval capabilities:**
+- 🔍 **Search notes** and get complete results with metadata
 - 🏷️ **Retrieve all tags** from your Bear database
-- 📖 **Read note content** for analysis
+- 📖 **Read note content** for analysis and summarization
 - ✏️ **Create notes** and get their IDs back
 - 📝 **Add text** to existing notes
+- ✅ **Test setup** with comprehensive status checking
 
-### What's New in v4.0.0
-- ✅ **Fixed browser popup issues** - No more lingering browser windows!
-- ✅ **Improved HTTP callback handling** - Auto-closing responses
-- ✅ **Better error handling** - Clear error messages and recovery
-- ✅ **Silent operation** - Bear stays in background during operations
+## ⚠️ Current Limitations & Usage Guidelines
+
+### Browser Window Behavior
+**Expected**: Brief browser windows may appear during search/tags operations due to Bear's callback system.
+- Windows are automatically minimized and moved off-screen
+- Auto-close within 1-2 seconds in most cases
+- **Safe to manually close** if they persist
+- **Focus is returned** to your original window automatically
+
+### Search Reliability
+**Success Rate**: ~80-90% of searches work reliably
+- **Occasional timeouts** may occur (20-second limit)
+- **Simple terms** work better than complex queries
+- **Retry once** if a search times out
+- **Single words** tend to be more reliable than phrases
+
+### Best Practices
+✅ **Recommended Usage**:
+```
+Search my Bear notes for "project"
+Get all my Bear tags
+Create a note titled "Meeting Notes" with today's agenda
+Add "Action item: Follow up" to my "Weekly Review" note
+```
+
+⚠️ **If Issues Occur**:
+- **Timeouts**: Wait a moment and retry the same search
+- **Browser windows**: Safe to close manually if they don't auto-close
+- **No results**: Try simpler/broader search terms
+- **Setup issues**: Use `check_bear_setup` to diagnose
 
 ## Available Tools
 
-| Tool | Functionality | Returns |
-|------|---------------|---------|
-| `create_note` | Creates new notes | ✅ Note ID and title |
-| `get_note` | Retrieves note content | ✅ Full note text, tags, dates |
-| `search_notes` | Searches notes | ✅ List with titles, IDs, tags |
-| `get_tags` | Lists all tags | ✅ Complete tag list |
-| `add_text` | Adds text to notes | ✅ Success confirmation |
-| `check_bear_setup` | Tests configuration | ✅ Setup status and sample data |
+| Tool | Functionality | Reliability | Notes |
+|------|---------------|-------------|-------|
+| `create_note` | Creates new notes | ✅ Excellent | Always works, returns ID |
+| `add_text` | Adds text to notes | ✅ Excellent | Reliable text addition |
+| `check_bear_setup` | Tests configuration | ✅ Excellent | Diagnostic tool |
+| `search_notes` | Searches notes | ⚠️ Good | ~80-90% success, may timeout |
+| `get_tags` | Lists all tags | ⚠️ Good | Usually works, brief popup |
+| `get_note` | Retrieves note content | ⚠️ Good | Works well with valid IDs |
 
 ## Installation
 
@@ -99,58 +125,69 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 
 ### Setup and Testing
 ```
-Check my Bear setup and show me a summary of what's available
+Check my Bear setup and show me what's available
 ```
 
-### Creating and Reading Notes
+### Reliable Operations (Always Work)
 ```
-Create a new Bear note titled "Project Ideas" with content about machine learning applications
+Create a new Bear note titled "Project Ideas" with content about machine learning
 
-Get the content of my Bear note titled "Meeting Notes" so you can summarize it
-```
-
-### Searching and Organizing
-```
-Search my Bear notes for "project roadmap" and show me what you find
-
-Get all my Bear tags and identify which ones might be redundant
+Add "## Next Steps\n- Review documentation\n- Schedule follow-up" to my "Weekly Review" note
 ```
 
-### Working with Content
+### Search Operations (Usually Work)
 ```
-Add "## Action Items\n- Follow up with team" to my Bear note titled "Weekly Review"
+Search my Bear notes for "machine learning" and show me what you find
+
+Get all my Bear tags and help me organize them
 ```
 
-## Technical Details
+### Content Analysis (When Search Works)
+```
+Search for "meeting notes" then help me identify common action items across all results
 
-### HTTP Callback Handling
-The server uses a local HTTP server (port 51234) to receive Bear's x-callback-url responses. When Bear completes an operation, it sends the results back to this server. The new implementation:
-
-- Sends proper CORS headers for browser compatibility
-- Returns auto-closing HTML pages to prevent lingering windows
-- Implements request timeouts for reliability
-- Cleans up connections immediately after use
-
-### Browser Window Behavior
-If you see a browser window flash briefly when using the tools, this is normal. The window should close automatically within a second. If windows persist, check your browser's popup settings.
+Find notes tagged with "work" and summarize the main topics
+```
 
 ## Troubleshooting
 
+### "Search failed: Callback timeout"
+- **Normal**: Happens ~10-20% of the time
+- **Solution**: Wait 5-10 seconds and retry the same search
+- **Tip**: Try simpler search terms (single words work better)
+
 ### "No token configured"
-Get your token from Bear → Help → Advanced → API Token, then use the `set_bear_token` tool.
+Get your token: Bear → Help → Advanced → API Token → Copy Token, then use `set_bear_token`
 
 ### "Bear not found"
 Make sure Bear is installed and has been opened at least once.
 
-### Browser windows not closing
-- Check your browser allows JavaScript to close windows
-- The window should show "✓ Success! This window will close automatically..."
-- If issues persist, you can safely close these windows manually
+### Browser windows appearing
+- **Expected behavior** due to Bear's callback system
+- Windows auto-minimize and move off-screen
+- Safe to manually close if they persist
+- Focus returns to your original window automatically
 
 ### No search results
-- Ensure your search term exists in your notes
-- Check that your token is valid using `check_bear_setup`
-- Try a simpler search term
+- **Check search term**: Ensure it exists in your notes
+- **Verify token**: Use `check_bear_setup` to test
+- **Try broader terms**: Single words often work better than phrases
+- **Check Bear directly**: Verify the content exists in Bear app
+
+## Technical Details
+
+### HTTP Callback System
+The server uses HTTP callbacks (port 51234) to receive data from Bear:
+- Bear sends search results and tag data via URL callbacks
+- Browser windows appear briefly due to this callback mechanism
+- 20-second timeout for Bear responses
+- Auto-retry mechanisms for common failures
+
+### Performance Characteristics
+- **Fast operations**: Note creation, text addition (~1-2 seconds)
+- **Medium operations**: Single note retrieval (~3-5 seconds)  
+- **Slower operations**: Search, tags list (~5-15 seconds)
+- **Timeout threshold**: 20 seconds maximum wait
 
 ## Development
 
@@ -165,10 +202,12 @@ npm run build
 node dist/index.js
 ```
 
-To run the test script:
-```bash
-node test-restored.js
-```
+## Version History
+
+- **v4.0.2**: Enhanced browser window handling, 20s timeout
+- **v4.0.1**: Improved callback reliability, better error messages  
+- **v4.0.0**: Full functionality restored with callback system
+- **v3.1.0**: Documentation-only version (limited functionality)
 
 ## Requirements
 
