@@ -1,12 +1,21 @@
 {
   "name": "bear-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for Bear Note Taking App",
+  "version": "0.1.0",
+  "description": "MCP server for Bear Note Taking App - integrate Bear with Claude Desktop",
   "main": "dist/index.js",
+  "bin": {
+    "bear-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
   },
   "keywords": ["mcp", "bear", "notes", "bear-app", "model-context-protocol"],
   "author": "",
