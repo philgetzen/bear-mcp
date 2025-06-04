@@ -1,5 +1,9 @@
 # Bear MCP Server
 
+![CI/CD](https://github.com/YOUR_USERNAME/bear-mcp/workflows/CI%2FCD%20Pipeline/badge.svg)
+![License](https://img.shields.io/github/license/YOUR_USERNAME/bear-mcp)
+![npm version](https://img.shields.io/npm/v/bear-mcp)
+
 An MCP (Model Context Protocol) server for integrating Bear Note Taking App with Claude Desktop.
 
 ## Features

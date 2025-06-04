@@ -8,9 +8,17 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js"
   },
-  "keywords": ["mcp", "bear", "notes"],
+  "keywords": ["mcp", "bear", "notes", "bear-app", "model-context-protocol"],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YOUR_USERNAME/bear-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/YOUR_USERNAME/bear-mcp/issues"
+  },
+  "homepage": "https://github.com/YOUR_USERNAME/bear-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "open": "^10.1.0"
