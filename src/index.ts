@@ -14,7 +14,7 @@ import * as os from "os";
 
 const BEAR_URL_SCHEME = "bear://x-callback-url";
 const CALLBACK_PORT = 51234;
-const CALLBACK_TIMEOUT = 15000; // Increased to 15 seconds
+const CALLBACK_TIMEOUT = 20000; // Increased to 20 seconds
 
 // Token configuration
 const CONFIG_DIR = path.join(os.homedir(), '.bear-mcp');
@@ -136,12 +136,13 @@ class BearCallbackHandler {
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            display: flex;
+            display: none; /* Hide content immediately */
             justify-content: center;
             align-items: center;
             height: 100vh;
             margin: 0;
-            background-color: #f5f5f5;
+            background-color: transparent;
+            opacity: 0;
         }
         .message {
             text-align: center;
@@ -168,48 +169,76 @@ class BearCallbackHandler {
         <div class="text" style="font-size: 14px; margin-top: 10px;">This window will close automatically...</div>
     </div>
     <script>
+        // Prevent focus stealing immediately
+        try { 
+            window.blur(); 
+            if (window.opener && window.opener.focus) {
+                window.opener.focus();
+            }
+        } catch(e) {}
+        
         // Immediately try to close (most aggressive approach)
         try { window.close(); } catch(e) {}
         try { self.close(); } catch(e) {}
         
-        // Multiple fallback methods with shorter delays
-        setTimeout(function() {
-            try { window.close(); } catch(e) {}
-            try { self.close(); } catch(e) {}
-            
-            // Try closing via opener
-            if (window.opener && window.opener !== window) {
-                try {
-                    window.opener = null;
-                    window.close();
-                } catch(e) {}
-            }
-        }, 100);
+        // Minimize and hide window ASAP to prevent visibility
+        try {
+            window.resizeTo(1, 1);
+            window.moveTo(-1000, -1000);
+            window.blur();
+        } catch(e) {}
         
-        // Final attempt with redirect
+        // Multiple close attempts with very short delays
+        for (let i = 0; i < 10; i++) {
+            setTimeout(function() {
+                try { window.close(); } catch(e) {}
+                try { self.close(); } catch(e) {}
+                
+                // Keep blurring to prevent focus stealing
+                try { window.blur(); } catch(e) {}
+                
+                // Try closing via opener
+                if (window.opener && window.opener !== window) {
+                    try {
+                        window.opener.focus(); // Give focus back to opener
+                        window.opener = null;
+                        window.close();
+                    } catch(e) {}
+                }
+            }, i * 50); // Every 50ms for 500ms total
+        }
+        
+        // Final desperate attempts
         setTimeout(function() {
             try {
                 window.location.href = 'about:blank';
                 window.close();
             } catch(e) {}
             
-            // Hide the window content if we can't close it
+            // Hide completely if we can't close
+            document.documentElement.style.display = 'none';
             document.body.style.display = 'none';
-        }, 300);
+        }, 600);
         
-        // Listen for any user interaction to close
-        document.addEventListener('click', function() {
-            try { window.close(); } catch(e) {}
+        // Listen for any events to close immediately
+        ['click', 'focus', 'mouseover', 'keydown'].forEach(function(event) {
+            document.addEventListener(event, function() {
+                try { window.close(); } catch(e) {}
+            });
         });
         
-        // Try to minimize the window if close fails
-        setTimeout(function() {
-            try {
-                window.blur();
-                window.resizeTo(1, 1);
-                window.moveTo(0, 0);
+        // Last resort: periodic close attempts
+        const closeInterval = setInterval(function() {
+            try { 
+                window.close(); 
+                clearInterval(closeInterval);
             } catch(e) {}
-        }, 1000);
+        }, 100);
+        
+        // Clear interval after 5 seconds
+        setTimeout(function() {
+            clearInterval(closeInterval);
+        }, 5000);
     </script>
 </body>
 </html>`);
@@ -345,7 +374,7 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
 const server = new Server(
   {
     name: "bear-mcp",
-    version: "4.0.1",
+    version: "4.0.2",
   },
   {
     capabilities: {
