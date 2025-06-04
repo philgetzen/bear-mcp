@@ -14,7 +14,7 @@ import * as os from "os";
 
 const BEAR_URL_SCHEME = "bear://x-callback-url";
 const CALLBACK_PORT = 51234;
-const CALLBACK_TIMEOUT = 5000;
+const CALLBACK_TIMEOUT = 8000; // Increased timeout
 
 // Token configuration
 const CONFIG_DIR = path.join(os.homedir(), '.bear-mcp');
@@ -53,7 +53,10 @@ function saveToken(token: string): void {
   }
 }
 
-const APP_TOKEN = loadToken() || process.env.BEAR_TOKEN || null;
+// Global token - reload on each use to pick up changes
+function getCurrentToken(): string | null {
+  return loadToken() || process.env.BEAR_TOKEN || null;
+}
 
 class BearCallbackHandler {
   private server: http.Server | null = null;
@@ -129,8 +132,13 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
   
   try {
     // Add token if required and available
-    if (requiresToken && APP_TOKEN) {
-      params.token = APP_TOKEN;
+    if (requiresToken) {
+      const token = getCurrentToken();
+      if (token) {
+        params.token = token;
+      } else {
+        throw new Error("Token required but not available");
+      }
     }
 
     // Start callback server if we expect a response
@@ -156,9 +164,18 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
     if (expectResponse) {
       try {
         const response = await callbackHandler.waitForCallback();
+        
+        // Check for errors in response
+        if (response['error-Code'] || response.errorMessage) {
+          throw new Error(`Bear API Error: ${response.errorMessage || 'Unknown error'} (Code: ${response['error-Code'] || 'unknown'})`);
+        }
+        
         return response;
       } catch (error) {
-        // Timeout or error - Bear might not support callback for this action
+        if (error instanceof Error && error.message.includes("Bear API Error")) {
+          throw error;
+        }
+        // Timeout or other error
         return null;
       }
     }
@@ -172,7 +189,7 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
 const server = new Server(
   {
     name: "bear-mcp",
-    version: "2.1.0",
+    version: "2.2.0",
   },
   {
     capabilities: {
@@ -196,6 +213,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["token"],
+        },
+      },
+      {
+        name: "check_bear_setup",
+        description: "Check if Bear is properly configured and test the connection",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
         },
       },
       {
@@ -335,14 +361,57 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const token = String(args.token);
         saveToken(token);
         
-        // Reload the token
-        const newToken = loadToken();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Bear token has been saved successfully. Use check_bear_setup to test the connection.`,
+            },
+          ],
+        };
+      }
+
+      case "check_bear_setup": {
+        let statusMessage = "Bear Setup Status:\n\n";
+        
+        // Check if Bear app is available
+        try {
+          execSync('osascript -e \'tell application "Bear" to activate\'', { stdio: 'ignore' });
+          statusMessage += "✅ Bear app is installed and accessible\n";
+        } catch {
+          statusMessage += "❌ Bear app not found or not accessible\n";
+          return {
+            content: [{ type: "text", text: statusMessage }],
+          };
+        }
+        
+        // Check token
+        const token = getCurrentToken();
+        if (token) {
+          statusMessage += "✅ Token is configured\n";
+          
+          // Test token by trying to get tags
+          try {
+            const response = await executeBearURL("tags", {}, true, true);
+            if (response && response.tags) {
+              statusMessage += `✅ Token is valid - found ${response.tags.length} tags\n`;
+              statusMessage += `📋 Sample tags: ${response.tags.slice(0, 3).join(", ")}${response.tags.length > 3 ? "..." : ""}`;
+            } else {
+              statusMessage += "⚠️ Token test returned no data (you might have no tags)";
+            }
+          } catch (error) {
+            statusMessage += `❌ Token test failed: ${error instanceof Error ? error.message : String(error)}`;
+          }
+        } else {
+          statusMessage += "❌ No token configured\n";
+          statusMessage += "\nTo fix: Get token from Bear → Help → Advanced → API Token → Copy Token\nThen use set_bear_token tool";
+        }
         
         return {
           content: [
             {
               type: "text",
-              text: `Bear token has been saved successfully. You can now use search and tag operations.`,
+              text: statusMessage,
             },
           ],
         };
@@ -417,12 +486,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "search_notes": {
-        if (!APP_TOKEN && !loadToken()) {
+        const token = getCurrentToken();
+        if (!token) {
           return {
             content: [
               {
                 type: "text",
-                text: "Search requires a Bear app token. Please:\n1. Open Bear → Help → Advanced → API Token → Copy Token\n2. Use the set_bear_token tool to save it",
+                text: "Search requires a Bear app token. Please:\n1. Open Bear → Help → Advanced → API Token → Copy Token\n2. Use the set_bear_token tool to save it\n3. Use check_bear_setup to verify",
               },
             ],
           };
@@ -434,42 +504,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.tag) params.tag = String(args.tag);
         if (!args.show_window) params["show_window"] = "no";
         
-        const response = await executeBearURL("search", params, true, true);
-        
-        if (response && response.notes) {
-          const notes = response.notes;
-          let resultText = `Found ${notes.length} notes matching "${args.term}":\n\n`;
+        try {
+          const response = await executeBearURL("search", params, true, true);
           
-          notes.forEach((note: any, index: number) => {
-            resultText += `${index + 1}. ${note.title || "Untitled"}\n`;
-            resultText += `   ID: ${note.identifier}\n`;
-            resultText += `   Tags: ${note.tags || "none"}\n`;
-            resultText += `   Modified: ${note.modificationDate}\n\n`;
-          });
-          
+          if (response && response.notes) {
+            const notes = response.notes;
+            let resultText = `Found ${notes.length} notes matching "${args.term}":\n\n`;
+            
+            notes.forEach((note: any, index: number) => {
+              resultText += `${index + 1}. ${note.title || "Untitled"}\n`;
+              resultText += `   ID: ${note.identifier}\n`;
+              resultText += `   Tags: ${note.tags || "none"}\n`;
+              resultText += `   Modified: ${note.modificationDate}\n\n`;
+            });
+            
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: resultText,
+                },
+              ],
+            };
+          } else {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `No notes found matching "${args.term}". This could mean:\n1. No notes match your search term\n2. Try a different search term\n3. Use check_bear_setup to verify your configuration`,
+                },
+              ],
+            };
+          }
+        } catch (error) {
           return {
             content: [
               {
                 type: "text",
-                text: resultText,
-              },
-            ],
-          };
-        } else if (args.show_window) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Search results shown in Bear window",
-              },
-            ],
-          };
-        } else {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Search completed but no results returned. This might mean:\n1. No notes match your search\n2. Token is invalid (regenerate in Bear → Help → Advanced → API Token)\n3. Bear's x-callback-url setting is disabled",
+                text: `Search failed: ${error instanceof Error ? error.message : String(error)}\n\nTry using check_bear_setup to diagnose the issue.`,
               },
             ],
           };
@@ -477,12 +549,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_tags": {
-        if (!APP_TOKEN && !loadToken()) {
+        const token = getCurrentToken();
+        if (!token) {
           return {
             content: [
               {
                 type: "text",
-                text: "Getting tags requires a Bear app token. Please:\n1. Open Bear → Help → Advanced → API Token → Copy Token\n2. Use the set_bear_token tool to save it",
+                text: "Getting tags requires a Bear app token. Please:\n1. Open Bear → Help → Advanced → API Token → Copy Token\n2. Use the set_bear_token tool to save it\n3. Use check_bear_setup to verify",
               },
             ],
           };
@@ -491,33 +564,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const params: BearParams = {};
         if (!args.show_window) params["show_window"] = "no";
         
-        const response = await executeBearURL("tags", params, true, true);
-        
-        if (response && response.tags) {
-          const tags = response.tags;
+        try {
+          const response = await executeBearURL("tags", params, true, true);
+          
+          if (response && response.tags) {
+            const tags = response.tags;
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Found ${tags.length} tags:\n\n${tags.join("\n")}`,
+                },
+              ],
+            };
+          } else {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "No tags found. This could mean:\n1. You have no tags in Bear\n2. Try creating some notes with tags first\n3. Use check_bear_setup to verify your configuration",
+                },
+              ],
+            };
+          }
+        } catch (error) {
           return {
             content: [
               {
                 type: "text",
-                text: `Found ${tags.length} tags:\n\n${tags.join("\n")}`,
-              },
-            ],
-          };
-        } else if (args.show_window) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Tags shown in Bear window",
-              },
-            ],
-          };
-        } else {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Unable to retrieve tags. This might mean:\n1. No tags exist\n2. Token is invalid (regenerate in Bear → Help → Advanced → API Token)\n3. Bear's x-callback-url setting is disabled",
+                text: `Getting tags failed: ${error instanceof Error ? error.message : String(error)}\n\nTry using check_bear_setup to diagnose the issue.`,
               },
             ],
           };
@@ -575,11 +650,12 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   
-  if (!APP_TOKEN) {
-    console.error("Bear MCP server v2.1 running - No token configured");
-    console.error("To access existing notes, set token with 'set_bear_token' tool");
+  const token = getCurrentToken();
+  if (!token) {
+    console.error("Bear MCP server v2.2 running - No token configured");
+    console.error("Use 'set_bear_token' tool to configure authentication");
   } else {
-    console.error("Bear MCP server v2.1 running with token authentication");
+    console.error("Bear MCP server v2.2 running with token authentication");
   }
 }
 
