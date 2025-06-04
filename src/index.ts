@@ -14,7 +14,7 @@ import * as os from "os";
 
 const BEAR_URL_SCHEME = "bear://x-callback-url";
 const CALLBACK_PORT = 51234;
-const CALLBACK_TIMEOUT = 10000;
+const CALLBACK_TIMEOUT = 15000; // Increased to 15 seconds
 
 // Token configuration
 const CONFIG_DIR = path.join(os.homedir(), '.bear-mcp');
@@ -168,31 +168,48 @@ class BearCallbackHandler {
         <div class="text" style="font-size: 14px; margin-top: 10px;">This window will close automatically...</div>
     </div>
     <script>
-        // Try multiple methods to close the window
-        setTimeout(function() {
-            // Method 1: Standard window.close()
-            window.close();
-            
-            // Method 2: Try to close via opener
-            if (window.opener && window.opener !== window) {
-                window.opener = null;
-                window.close();
-            }
-            
-            // Method 3: Try self.close()
-            self.close();
-            
-            // Method 4: Redirect to about:blank then close
-            setTimeout(function() {
-                window.location = 'about:blank';
-                window.close();
-            }, 100);
-        }, 500); // Give user time to see the success message
+        // Immediately try to close (most aggressive approach)
+        try { window.close(); } catch(e) {}
+        try { self.close(); } catch(e) {}
         
-        // Also try to close immediately
-        try {
-            window.close();
-        } catch(e) {}
+        // Multiple fallback methods with shorter delays
+        setTimeout(function() {
+            try { window.close(); } catch(e) {}
+            try { self.close(); } catch(e) {}
+            
+            // Try closing via opener
+            if (window.opener && window.opener !== window) {
+                try {
+                    window.opener = null;
+                    window.close();
+                } catch(e) {}
+            }
+        }, 100);
+        
+        // Final attempt with redirect
+        setTimeout(function() {
+            try {
+                window.location.href = 'about:blank';
+                window.close();
+            } catch(e) {}
+            
+            // Hide the window content if we can't close it
+            document.body.style.display = 'none';
+        }, 300);
+        
+        // Listen for any user interaction to close
+        document.addEventListener('click', function() {
+            try { window.close(); } catch(e) {}
+        });
+        
+        // Try to minimize the window if close fails
+        setTimeout(function() {
+            try {
+                window.blur();
+                window.resizeTo(1, 1);
+                window.moveTo(0, 0);
+            } catch(e) {}
+        }, 1000);
     </script>
 </body>
 </html>`);
@@ -224,13 +241,14 @@ class BearCallbackHandler {
       this.responseResolve = resolve;
       this.responseReject = reject;
       
-      // Set a timeout
-      setTimeout(() => {
+      // Set a timeout with better error information
+      const timeoutId = setTimeout(() => {
         if (this.responseResolve) {
-          console.error("[DEBUG] Callback timeout reached");
+          console.error(`[DEBUG] Callback timeout reached after ${CALLBACK_TIMEOUT}ms`);
+          console.error(`[DEBUG] Callback server still running on port ${CALLBACK_PORT}`);
           this.responseResolve = null;
           this.responseReject = null;
-          reject(new Error("Callback timeout - no response received from Bear"));
+          reject(new Error(`Callback timeout after ${CALLBACK_TIMEOUT/1000}s - Bear may be slow to respond or the search returned no results. Try again or check Bear's status.`));
         }
       }, CALLBACK_TIMEOUT);
     });
@@ -327,7 +345,7 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
 const server = new Server(
   {
     name: "bear-mcp",
-    version: "4.0.0",
+    version: "4.0.1",
   },
   {
     capabilities: {
@@ -624,6 +642,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.tag) params.tag = String(args.tag);
         
         try {
+          console.error(`[DEBUG] Searching for "${args.term}"${args.tag ? ` in tag "${args.tag}"` : ''}`);
           const response = await executeBearURL("search", params, true, true);
           console.error("[DEBUG] Search response:", response);
           
