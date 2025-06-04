@@ -14,7 +14,7 @@ import * as os from "os";
 
 const BEAR_URL_SCHEME = "bear://x-callback-url";
 const CALLBACK_PORT = 51234;
-const CALLBACK_TIMEOUT = 8000; // Increased timeout
+const CALLBACK_TIMEOUT = 10000; // Even longer timeout
 
 // Token configuration
 const CONFIG_DIR = path.join(os.homedir(), '.bear-mcp');
@@ -67,6 +67,8 @@ class BearCallbackHandler {
     if (this.server) return;
 
     this.server = http.createServer((req, res) => {
+      console.error(`[DEBUG] Received callback: ${req.url}`);
+      
       if (!req.url) {
         res.writeHead(400);
         res.end();
@@ -78,22 +80,31 @@ class BearCallbackHandler {
       if (url.pathname === "/bear-callback") {
         const response: BearResponse = {};
         
+        // Log all search params for debugging
+        console.error(`[DEBUG] Search params:`, Object.fromEntries(url.searchParams));
+        
         url.searchParams.forEach((value, key) => {
+          console.error(`[DEBUG] Processing: ${key} = ${value}`);
           try {
-            // Try to parse as JSON (for arrays)
-            response[key] = JSON.parse(decodeURIComponent(value));
+            // Try to parse as JSON (for arrays and objects)
+            const parsed = JSON.parse(decodeURIComponent(value));
+            response[key] = parsed;
+            console.error(`[DEBUG] Parsed as JSON: ${key} =`, parsed);
           } catch {
             // If not JSON, treat as string
             response[key] = decodeURIComponent(value);
+            console.error(`[DEBUG] Parsed as string: ${key} = ${response[key]}`);
           }
         });
+
+        console.error(`[DEBUG] Final response:`, response);
 
         if (this.responseResolve) {
           this.responseResolve(response);
         }
 
         res.writeHead(200, { "Content-Type": "text/html" });
-        res.end("<html><body><h1>Success!</h1><p>You can close this window.</p><script>window.close();</script></body></html>");
+        res.end("<html><body><h1>Success!</h1><p>Data received. You can close this window.</p><script>setTimeout(() => window.close(), 1000);</script></body></html>");
       } else {
         res.writeHead(404);
         res.end();
@@ -102,6 +113,7 @@ class BearCallbackHandler {
 
     await new Promise<void>((resolve) => {
       this.server!.listen(CALLBACK_PORT, () => {
+        console.error(`[DEBUG] Callback server listening on port ${CALLBACK_PORT}`);
         resolve();
       });
     });
@@ -112,6 +124,7 @@ class BearCallbackHandler {
       this.responseResolve = resolve;
       
       setTimeout(() => {
+        console.error("[DEBUG] Callback timeout reached");
         reject(new Error("Callback timeout"));
       }, CALLBACK_TIMEOUT);
     });
@@ -123,6 +136,7 @@ class BearCallbackHandler {
     if (this.server) {
       this.server.close();
       this.server = null;
+      console.error("[DEBUG] Callback server stopped");
     }
   }
 }
@@ -156,6 +170,8 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
       }
     });
 
+    console.error(`[DEBUG] Opening Bear URL: ${url.toString()}`);
+
     // Use AppleScript to open the URL (more reliable than 'open' command)
     const script = `open location "${url.toString()}"`;
     execSync(`osascript -e '${script}'`);
@@ -176,6 +192,7 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
           throw error;
         }
         // Timeout or other error
+        console.error(`[DEBUG] Callback failed:`, error);
         return null;
       }
     }
@@ -189,7 +206,7 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
 const server = new Server(
   {
     name: "bear-mcp",
-    version: "2.2.0",
+    version: "2.3.0",
   },
   {
     capabilities: {
@@ -393,9 +410,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           // Test token by trying to get tags
           try {
             const response = await executeBearURL("tags", {}, true, true);
+            console.error("[DEBUG] Tags response:", response);
+            
             if (response && response.tags) {
-              statusMessage += `✅ Token is valid - found ${response.tags.length} tags\n`;
-              statusMessage += `📋 Sample tags: ${response.tags.slice(0, 3).join(", ")}${response.tags.length > 3 ? "..." : ""}`;
+              // Handle both old format (array of strings) and new format (array of objects)
+              let tagNames: string[] = [];
+              if (Array.isArray(response.tags)) {
+                tagNames = response.tags.map((tag: any) => {
+                  if (typeof tag === 'string') {
+                    return tag;
+                  } else if (tag && tag.name) {
+                    return tag.name;
+                  } else {
+                    return String(tag);
+                  }
+                });
+              }
+              
+              statusMessage += `✅ Token is valid - found ${tagNames.length} tags\n`;
+              if (tagNames.length > 0) {
+                statusMessage += `📋 Sample tags: ${tagNames.slice(0, 5).join(", ")}${tagNames.length > 5 ? "..." : ""}`;
+              }
             } else {
               statusMessage += "⚠️ Token test returned no data (you might have no tags)";
             }
@@ -506,15 +541,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         try {
           const response = await executeBearURL("search", params, true, true);
+          console.error("[DEBUG] Search response:", response);
           
-          if (response && response.notes) {
+          if (response && response.notes && Array.isArray(response.notes)) {
             const notes = response.notes;
             let resultText = `Found ${notes.length} notes matching "${args.term}":\n\n`;
             
             notes.forEach((note: any, index: number) => {
               resultText += `${index + 1}. ${note.title || "Untitled"}\n`;
               resultText += `   ID: ${note.identifier}\n`;
-              resultText += `   Tags: ${note.tags || "none"}\n`;
+              
+              // Handle tags properly
+              if (note.tags && Array.isArray(note.tags)) {
+                resultText += `   Tags: ${note.tags.join(", ")}\n`;
+              } else {
+                resultText += `   Tags: none\n`;
+              }
+              
               resultText += `   Modified: ${note.modificationDate}\n\n`;
             });
             
@@ -566,14 +609,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         try {
           const response = await executeBearURL("tags", params, true, true);
+          console.error("[DEBUG] Get tags response:", response);
           
-          if (response && response.tags) {
-            const tags = response.tags;
+          if (response && response.tags && Array.isArray(response.tags)) {
+            // Handle both old format (array of strings) and new format (array of objects)
+            let tagNames: string[] = [];
+            tagNames = response.tags.map((tag: any) => {
+              if (typeof tag === 'string') {
+                return tag;
+              } else if (tag && tag.name) {
+                return tag.name;
+              } else {
+                return String(tag);
+              }
+            });
+            
             return {
               content: [
                 {
                   type: "text",
-                  text: `Found ${tags.length} tags:\n\n${tags.join("\n")}`,
+                  text: `Found ${tagNames.length} tags:\n\n${tagNames.join("\n")}`,
                 },
               ],
             };
@@ -652,10 +707,10 @@ async function main() {
   
   const token = getCurrentToken();
   if (!token) {
-    console.error("Bear MCP server v2.2 running - No token configured");
+    console.error("Bear MCP server v2.3 running - No token configured");
     console.error("Use 'set_bear_token' tool to configure authentication");
   } else {
-    console.error("Bear MCP server v2.2 running with token authentication");
+    console.error("Bear MCP server v2.3 running with token authentication");
   }
 }
 
