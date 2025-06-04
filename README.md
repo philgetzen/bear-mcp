@@ -25,12 +25,18 @@ An MCP (Model Context Protocol) server for integrating Bear Note Taking App with
 
 ## Important: Bear Configuration
 
-To enable data retrieval features:
-1. Open Bear → Settings (⌘,)
-2. Go to "Advanced" tab
-3. Enable "Allow x-callback-url"
+### Required Settings:
+1. **Enable x-callback-url**:
+   - Open Bear → Settings (⌘,)
+   - Go to "Advanced" tab
+   - Enable "Allow x-callback-url"
 
-Without this setting, tools will only open Bear but won't return data to Claude.
+2. **Generate API Token** (for search and tags):
+   - Open Bear → Help → Advanced → API Token
+   - Click "Copy Token"
+   - In Claude, use: `set_bear_token` with your token
+
+Without these settings, tools will have limited functionality.
 
 ## Installation
 

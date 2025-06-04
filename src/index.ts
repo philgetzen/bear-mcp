@@ -8,10 +8,17 @@ import {
 import { execSync } from "child_process";
 import * as http from "http";
 import { URL } from "url";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 const BEAR_URL_SCHEME = "bear://x-callback-url";
 const CALLBACK_PORT = 51234;
 const CALLBACK_TIMEOUT = 5000;
+
+// Token configuration
+const CONFIG_DIR = path.join(os.homedir(), '.bear-mcp');
+const TOKEN_FILE = path.join(CONFIG_DIR, 'token');
 
 interface BearParams {
   [key: string]: string | undefined;
@@ -20,6 +27,33 @@ interface BearParams {
 interface BearResponse {
   [key: string]: any;
 }
+
+// Load token from file if it exists
+function loadToken(): string | null {
+  try {
+    if (fs.existsSync(TOKEN_FILE)) {
+      return fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+    }
+  } catch (error) {
+    console.error("Error loading token:", error);
+  }
+  return null;
+}
+
+// Save token to file
+function saveToken(token: string): void {
+  try {
+    if (!fs.existsSync(CONFIG_DIR)) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+    fs.writeFileSync(TOKEN_FILE, token, 'utf8');
+    fs.chmodSync(TOKEN_FILE, 0o600); // Secure the token file
+  } catch (error) {
+    console.error("Error saving token:", error);
+  }
+}
+
+const APP_TOKEN = loadToken() || process.env.BEAR_TOKEN || null;
 
 class BearCallbackHandler {
   private server: http.Server | null = null;
@@ -90,10 +124,15 @@ class BearCallbackHandler {
   }
 }
 
-async function executeBearURL(action: string, params: BearParams, expectResponse: boolean = false): Promise<BearResponse | null> {
+async function executeBearURL(action: string, params: BearParams, expectResponse: boolean = false, requiresToken: boolean = false): Promise<BearResponse | null> {
   const callbackHandler = new BearCallbackHandler();
   
   try {
+    // Add token if required and available
+    if (requiresToken && APP_TOKEN) {
+      params.token = APP_TOKEN;
+    }
+
     // Start callback server if we expect a response
     if (expectResponse) {
       await callbackHandler.startServer();
@@ -133,7 +172,7 @@ async function executeBearURL(action: string, params: BearParams, expectResponse
 const server = new Server(
   {
     name: "bear-mcp",
-    version: "2.0.0",
+    version: "2.1.0",
   },
   {
     capabilities: {
@@ -145,6 +184,20 @@ const server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
+      {
+        name: "set_bear_token",
+        description: "Set the Bear app token for accessing existing notes. Get your token from Bear → Help → Advanced → API Token",
+        inputSchema: {
+          type: "object",
+          properties: {
+            token: {
+              type: "string",
+              description: "Your Bear app token",
+            },
+          },
+          required: ["token"],
+        },
+      },
       {
         name: "create_note",
         description: "Create a new note in Bear and return its ID",
@@ -197,7 +250,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "search_notes",
-        description: "Search for notes and return results with metadata",
+        description: "Search for notes and return results with metadata (requires token)",
         inputSchema: {
           type: "object",
           properties: {
@@ -220,7 +273,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_tags",
-        description: "Get all tags from Bear",
+        description: "Get all tags from Bear (requires token)",
         inputSchema: {
           type: "object",
           properties: {
@@ -278,6 +331,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
+      case "set_bear_token": {
+        const token = String(args.token);
+        saveToken(token);
+        
+        // Reload the token
+        const newToken = loadToken();
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Bear token has been saved successfully. You can now use search and tag operations.`,
+            },
+          ],
+        };
+      }
+
       case "create_note": {
         const params: BearParams = {};
         if (args.title) params.title = String(args.title);
@@ -347,13 +417,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "search_notes": {
+        if (!APP_TOKEN && !loadToken()) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Search requires a Bear app token. Please:\n1. Open Bear → Help → Advanced → API Token → Copy Token\n2. Use the set_bear_token tool to save it",
+              },
+            ],
+          };
+        }
+
         const params: BearParams = {
           term: String(args.term),
         };
         if (args.tag) params.tag = String(args.tag);
         if (!args.show_window) params["show_window"] = "no";
         
-        const response = await executeBearURL("search", params, true);
+        const response = await executeBearURL("search", params, true, true);
         
         if (response && response.notes) {
           const notes = response.notes;
@@ -388,7 +469,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [
               {
                 type: "text",
-                text: "Search completed but results not returned. Enable Bear's advanced settings for x-callback-url.",
+                text: "Search completed but no results returned. This might mean:\n1. No notes match your search\n2. Token is invalid (regenerate in Bear → Help → Advanced → API Token)\n3. Bear's x-callback-url setting is disabled",
               },
             ],
           };
@@ -396,10 +477,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_tags": {
+        if (!APP_TOKEN && !loadToken()) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Getting tags requires a Bear app token. Please:\n1. Open Bear → Help → Advanced → API Token → Copy Token\n2. Use the set_bear_token tool to save it",
+              },
+            ],
+          };
+        }
+
         const params: BearParams = {};
         if (!args.show_window) params["show_window"] = "no";
         
-        const response = await executeBearURL("tags", params, true);
+        const response = await executeBearURL("tags", params, true, true);
         
         if (response && response.tags) {
           const tags = response.tags;
@@ -425,7 +517,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [
               {
                 type: "text",
-                text: "Unable to retrieve tags. Enable Bear's advanced settings for x-callback-url.",
+                text: "Unable to retrieve tags. This might mean:\n1. No tags exist\n2. Token is invalid (regenerate in Bear → Help → Advanced → API Token)\n3. Bear's x-callback-url setting is disabled",
               },
             ],
           };
@@ -482,7 +574,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Bear MCP server v2 running with callback support");
+  
+  if (!APP_TOKEN) {
+    console.error("Bear MCP server v2.1 running - No token configured");
+    console.error("To access existing notes, set token with 'set_bear_token' tool");
+  } else {
+    console.error("Bear MCP server v2.1 running with token authentication");
+  }
 }
 
 main().catch((error) => {
