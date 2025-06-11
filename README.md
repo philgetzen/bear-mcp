@@ -6,6 +6,10 @@
 
 An MCP (Model Context Protocol) server for integrating Bear Note Taking App with Claude Desktop. This server allows Claude to read, create, and search your Bear notes directly.
 
+<a href="https://glama.ai/mcp/servers/@philgetzen/bear-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@philgetzen/bear-mcp/badge" alt="Bear Server MCP server" />
+</a>
+
 ## ✨ Features (v4.0.2)
 
 **Full data retrieval capabilities:**
