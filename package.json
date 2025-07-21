@@ -30,7 +30,7 @@
   "homepage": "https://github.com/philgetzen/bear-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "open": "^10.1.0",
+    "open": "^10.2.0",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
